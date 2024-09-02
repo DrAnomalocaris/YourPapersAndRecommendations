@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCBI Paper Search with Advanced Query</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        input, textarea, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        input, textarea {
+            background-color: #1e1e1e;
+            color: #ffffff;
+        }
+        button {
+            background-color: #6200ea;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #3700b3;
+        }
+        .card {
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+        .card h3 {
+            margin: 0 0 10px 0;
+        }
+        .card .date {
+            color: #bbbbbb;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+        .card p {
+            margin-top: 10px;
+        }
+        .card a {
+            color: #bb86fc;
+            text-decoration: none;
+        }
+        .card a:hover {
+            text-decoration: underline;
+        }
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #ffffff;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .query-string, .fetch-url {
+            background-color: #2a2a2a;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #bbbbbb;
+        }
+        footer {
+            margin-top: 20px;
+            text-align: center;
+            color: #bbbbbb;
+            font-size: 14px;
+        }
+        footer a {
+            color: #bb86fc;
+            text-decoration: none;
+        }
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NCBI Paper Search with Advanced Query</h1>
+        <input type="password" id="apiKey" placeholder="Enter OpenAI API Key" />
+        <textarea id="interestInput" rows="5" placeholder="Describe your interests or what you want to search for..."></textarea>
+        <button onclick="generateQueryAndSearch()">Generate Query and Search Papers</button>
+        <div id="loading" class="loading" style="display:none;">
+            <div class="spinner"></div>
+            <p style="margin-left: 10px;">Generating Query and Searching for Papers...</p>
+        </div>
+        <div id="results"></div>
+    </div>
+
+    <footer>
+        <p>Created by <a href="https://github.com/DrAnomalocaris" target="_blank">DrAnomalocaris</a></p>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedApiKey = localStorage.getItem('apiKey');
+            if (savedApiKey) document.getElementById('apiKey').value = savedApiKey;
+        });
+
+        async function generateQueryAndSearch() {
+            const apiKey = document.getElementById('apiKey').value;
+            const interestInput = document.getElementById('interestInput').value;
+            const resultsDiv = document.getElementById('results');
+            const loadingDiv = document.getElementById('loading');
+            resultsDiv.innerHTML = ''; 
+            loadingDiv.style.display = 'flex'; 
+
+            if (!apiKey || !interestInput) {
+                alert('Please enter both the OpenAI API key and your interests.');
+                loadingDiv.style.display = 'none';
+                return;
+            }
+
+            localStorage.setItem('apiKey', apiKey);
+
+            try {
+                // Use OpenAI to generate an advanced NCBI query string
+                let advancedQuery = await getOpenAIQuery(apiKey, interestInput, false);
+
+                // Display the generated advanced query string
+                resultsDiv.innerHTML += `<div class="query-string"><strong>Generated Advanced Query:</strong> ${advancedQuery}</div>`;
+
+                // Perform the NCBI search with the generated query
+                let foundResults = await searchNCBI(advancedQuery, resultsDiv);
+
+                // If no results found, request a more general query
+                if (!foundResults) {
+                    resultsDiv.innerHTML += '<p>No papers found for this query. Requesting a more general query...</p>';
+                    advancedQuery = await getOpenAIQuery(apiKey, interestInput, true);
+
+                    // Display the new, more general query string
+                    resultsDiv.innerHTML += `<div class="query-string"><strong>Generated More General Query:</strong> ${advancedQuery}</div>`;
+
+                    // Perform the NCBI search with the new query
+                    await searchNCBI(advancedQuery, resultsDiv);
+                }
+
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                alert('An error occurred while fetching data. Please try again later.');
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        }
+
+        async function getOpenAIQuery(apiKey, interestInput, isGeneral) {
+            const specificity = isGeneral ? "more general" : "specific";
+            const openaiUrl = 'https://api.openai.com/v1/chat/completions';
+            const openaiResponse = await fetch(openaiUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4-turbo',
+                    messages: [{ role: 'user', content: `Based on the following interests or topics, generate a ${specificity} NCBI query string using appropriate syntax (brackets, synonyms, AND, OR, NOT). Return only the query string without any explanation or extra text: ${interestInput}` }],
+                    max_tokens: 150
+                })
+            });
+
+            const openaiData = await openaiResponse.json();
+            return openaiData.choices[0].message.content.trim();
+        }
+
+        async function searchNCBI(query, resultsDiv) {
+            const ncbiUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=10&retmode=json`;
+            resultsDiv.innerHTML += `<div class="fetch-url"><strong>NCBI Fetch URL:</strong> ${ncbiUrl}</div>`;
+
+            const ncbiResponse = await fetch(ncbiUrl);
+            const ncbiData = await ncbiResponse.json();
+            const pmids = ncbiData.esearchresult.idlist;
+
+            if (pmids.length === 0) {
+                return false;  // No results found
+            }
+
+            const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(',')}&retmode=xml`;
+            const efetchResponse = await fetch(efetchUrl);
+            const efetchText = await efetchResponse.text();
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(efetchText, "application/xml");
+            const articles = xmlDoc.getElementsByTagName('PubmedArticle');
+
+            for (let article of articles) {
+                const title = article.getElementsByTagName('ArticleTitle')[0].textContent;
+                const abstract = article.getElementsByTagName('AbstractText')[0]?.textContent || 'No abstract available.';
+                const link = `https://pubmed.ncbi.nlm.nih.gov/${article.getElementsByTagName('PMID')[0].textContent}/`;
+                const publicationDate = article.getElementsByTagName('PubDate')[0]?.textContent || 'Unknown';
+
+                resultsDiv.innerHTML += `
+                    <div class="card">
+                        <h3><a href="${link}" target="_blank">${title}</a></h3>
+                        <div class="date">${publicationDate}</div>
+                        <p>${abstract}</p>
+                    </div>
+                `;
+            }
+
+            return true;  // Results were found and displayed
+        }
+    </script>
+</body>
+</html>
